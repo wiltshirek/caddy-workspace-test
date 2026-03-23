@@ -1,0 +1,27 @@
+# Agent workspace contract for a fork of: https://github.com/caddyserver/caddy
+# Default branch is `master`. Copy to repo root as Dockerfile.dev.
+
+FROM golang:bookworm
+
+ENV GOTOOLCHAIN=auto
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ca-certificates \
+    gh \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+LABEL mcp.tokens_required="GITHUB_TOKEN"
+LABEL mcp.runtime="golang:bookworm"
+LABEL mcp.libraries="caddy,certmagic,cobra,quic-go,zap,smallstep"
+LABEL mcp.test_cmd="go test -p 4 ./..."
+LABEL mcp.access="none"
+
+CMD ["go", "test", "-p", "4", "./..."]
