@@ -105,7 +105,7 @@ func (id ModuleID) Namespace() string {
 	if lastDot < 0 {
 		return ""
 	}
-	return string(id)[:lastDot]
+	return string(id)[:lastDot+1]
 }
 
 // Name returns the Name (last element) of a module ID.
