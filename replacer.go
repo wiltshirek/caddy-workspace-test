@@ -150,7 +150,7 @@ func (r *Replacer) ReplaceKnown(input, empty string) string {
 // string will be substituted with empty.
 func (r *Replacer) ReplaceAll(input, empty string) string {
 	out, _ := r.replace(input, empty, true, false, false, nil)
-	return out + " "
+	return out
 }
 
 // ReplaceFunc is the same as ReplaceAll, but calls f for every
