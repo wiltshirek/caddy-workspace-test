@@ -1,0 +1,73 @@
+name: MCP workspace (PR agent)
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_context:
+        description: "YAML task spec for the agent"
+        required: true
+        type: string
+      agent:
+        description: "Agent CLI to use (claude or gemini)"
+        required: false
+        type: string
+        default: "claude"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build dev image
+        run: docker build -f Dockerfile.dev -t ws-dev .
+
+      - name: Layer agent CLI
+        run: |
+          AGENT="${{ inputs.agent }}"
+          if [ "$AGENT" = "gemini" ]; then
+            INSTALL="npm install -g @google/gemini-cli"
+          else
+            INSTALL="npm install -g @anthropic-ai/claude-code"
+          fi
+          cat > /tmp/Dockerfile.agent <<AGENTEOF
+          FROM ws-dev
+          USER root
+          RUN command -v node >/dev/null 2>&1 || \
+              (apt-get update -qq && apt-get install -y -qq nodejs npm > /dev/null 2>&1) ; \
+              $INSTALL
+          RUN command -v gh >/dev/null 2>&1 || \
+              (apt-get update -qq && apt-get install -y -qq gh > /dev/null 2>&1) || true
+          AGENTEOF
+          docker build -f /tmp/Dockerfile.agent -t ws-agent /tmp
+
+      - name: Write task context
+        run: |
+          mkdir -p /tmp/ws-task/.task
+          cat > /tmp/ws-task/.task/context.yaml <<'CTXEOF'
+          ${{ inputs.task_context }}
+          CTXEOF
+
+      - name: Run agent
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          AGENT="${{ inputs.agent }}"
+          if [ "$AGENT" = "gemini" ]; then
+            CMD="gemini"
+          else
+            CMD="claude --output-format json -p"
+          fi
+          docker run --rm \
+            --memory 4g --pids-limit 512 \
+            -w /workspace \
+            -v /tmp/ws-task/.task:/workspace/.task:ro \
+            -e GITHUB_TOKEN -e ANTHROPIC_API_KEY -e GEMINI_API_KEY \
+            ws-agent \
+            sh -c "$CMD \"$(cat /workspace/.task/context.yaml)\""
