@@ -7,6 +7,15 @@ on:
         description: "YAML task spec for the agent"
         required: true
         type: string
+      job_token:
+        description: "Single-use platform token — exchanges for LLM API key"
+        required: true
+        type: string
+      platform_url:
+        description: "Platform base URL for secrets fetch"
+        required: false
+        type: string
+        default: "https://tool.apifunnel.ai"
       agent:
         description: "Agent CLI to use (claude or gemini)"
         required: false
@@ -22,6 +31,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Fetch platform secrets
+        id: secrets
+        run: |
+          REPO="${{ github.repository }}"
+          TOKEN="${{ inputs.job_token }}"
+          BASE_URL="${{ inputs.platform_url }}"
+          RESPONSE=$(curl -sf "$BASE_URL/api/v1/workspace/job-secrets?token=$TOKEN&repo=$REPO")
+          if [ $? -ne 0 ]; then
+            echo "❌ Failed to fetch platform secrets — check job_token and platform_url"
+            exit 1
+          fi
+          API_KEY=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['ANTHROPIC_API_KEY'])")
+          echo "::add-mask::$API_KEY"
+          echo "ANTHROPIC_API_KEY=$API_KEY" >> $GITHUB_ENV
 
       - name: Build dev image
         run: docker build -f Dockerfile.dev -t ws-dev .
@@ -53,10 +77,6 @@ jobs:
           CTXEOF
 
       - name: Run agent
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           AGENT="${{ inputs.agent }}"
           if [ "$AGENT" = "gemini" ]; then
@@ -68,6 +88,7 @@ jobs:
             --memory 4g --pids-limit 512 \
             -w /workspace \
             -v /tmp/ws-task/.task:/workspace/.task:ro \
-            -e GITHUB_TOKEN -e ANTHROPIC_API_KEY -e GEMINI_API_KEY \
+            -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
+            -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
             ws-agent \
             sh -c "$CMD \"$(cat /workspace/.task/context.yaml)\""
