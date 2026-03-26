@@ -78,73 +78,9 @@ jobs:
           ${{ inputs.task_context }}
           CTXEOF
 
-      - name: Write log formatter
-        run: |
-          cat > /tmp/fmt.py << 'PYEOF'
-import sys, json
-
-def fmt(line):
-    line = line.strip()
-    if not line:
-        return
-    try:
-        e = json.loads(line)
-    except Exception:
-        print(line, flush=True)
-        return
-    t = e.get("type")
-    sub = e.get("subtype", "")
-    if t == "system" and sub == "init":
-        print(f"
-🤖 Agent: {e.get('model')} v{e.get('claude_code_version')}  |  mode: {e.get('permissionMode')}
-", flush=True)
-    elif t == "system" and sub == "task_progress":
-        tool = e.get("last_tool_name", "")
-        desc = e.get("description", "")
-        tok = e.get("usage", {}).get("total_tokens", 0)
-        print(f"  ⚙️  [{tool}] {desc}  ({tok:,} tokens)", flush=True)
-    elif t == "assistant":
-        for c in e.get("message", {}).get("content", []):
-            if c.get("type") == "tool_use":
-                name = c["name"]
-                inp = c.get("input", {})
-                if name == "Bash":
-                    print(f"  🔧 Bash: {inp.get('description', inp.get('command','')[:80])}", flush=True)
-                elif name == "Edit":
-                    print(f"  ✏️  Edit: {inp.get('file_path','')}", flush=True)
-                elif name == "Write":
-                    print(f"  📝 Write: {inp.get('file_path','')}", flush=True)
-                elif name == "Agent":
-                    print(f"
-  🔍 SubAgent: {inp.get('description','')}", flush=True)
-            elif c.get("type") == "text":
-                txt = c.get("text", "").strip()
-                if txt:
-                    print(f"
-💬 {txt}
-", flush=True)
-    elif t == "result":
-        ok = not e.get("is_error")
-        turns = e.get("num_turns", "?")
-        dur = e.get("duration_ms", 0) / 1000
-        cost = e.get("total_cost_usd", 0)
-        status = "✅ SUCCESS" if ok else "❌ FAILED"
-        print(f"
-{'='*60}", flush=True)
-        print(f"{status}  |  {turns} turns  |  {dur:.1f}s  |  ${cost:.4f}", flush=True)
-        print(f"{'='*60}", flush=True)
-        result_text = e.get("result", "")
-        if result_text:
-            print(f"
-{result_text}
-", flush=True)
-
-for line in sys.stdin:
-    fmt(line)
-PYEOF
-
       - name: Run agent
         run: |
+          python3 -c "import base64; open('/tmp/fmt.py','wb').write(base64.b64decode('aW1wb3J0IHN5cywganNvbgoKZGVmIGZtdChsaW5lKToKICAgIGxpbmUgPSBsaW5lLnN0cmlwKCkKICAgIGlmIG5vdCBsaW5lOgogICAgICAgIHJldHVybgogICAgdHJ5OgogICAgICAgIGUgPSBqc29uLmxvYWRzKGxpbmUpCiAgICBleGNlcHQgRXhjZXB0aW9uOgogICAgICAgIHByaW50KGxpbmUsIGZsdXNoPVRydWUpCiAgICAgICAgcmV0dXJuCiAgICB0ID0gZS5nZXQoInR5cGUiKQogICAgc3ViID0gZS5nZXQoInN1YnR5cGUiLCAiIikKICAgIGlmIHQgPT0gInN5c3RlbSIgYW5kIHN1YiA9PSAiaW5pdCI6CiAgICAgICAgbSA9IGUuZ2V0KCJtb2RlbCIsICIiKQogICAgICAgIHYgPSBlLmdldCgiY2xhdWRlX2NvZGVfdmVyc2lvbiIsICIiKQogICAgICAgIHByaW50KGYiCltBR0VOVF0ge219IHZ7dn0KIiwgZmx1c2g9VHJ1ZSkKICAgIGVsaWYgdCA9PSAic3lzdGVtIiBhbmQgc3ViID09ICJ0YXNrX3Byb2dyZXNzIjoKICAgICAgICB0b29sID0gZS5nZXQoImxhc3RfdG9vbF9uYW1lIiwgIiIpCiAgICAgICAgZGVzYyA9IGUuZ2V0KCJkZXNjcmlwdGlvbiIsICIiKQogICAgICAgIHByaW50KGYiICBbe3Rvb2x9XSB7ZGVzY30iLCBmbHVzaD1UcnVlKQogICAgZWxpZiB0ID09ICJhc3Npc3RhbnQiOgogICAgICAgIGZvciBjIGluIGUuZ2V0KCJtZXNzYWdlIiwge30pLmdldCgiY29udGVudCIsIFtdKToKICAgICAgICAgICAgaWYgYy5nZXQoInR5cGUiKSA9PSAidG9vbF91c2UiOgogICAgICAgICAgICAgICAgbmFtZSA9IGNbIm5hbWUiXQogICAgICAgICAgICAgICAgaW5wID0gYy5nZXQoImlucHV0Iiwge30pCiAgICAgICAgICAgICAgICBpZiBuYW1lID09ICJCYXNoIjoKICAgICAgICAgICAgICAgICAgICBkID0gaW5wLmdldCgiZGVzY3JpcHRpb24iKSBvciBpbnAuZ2V0KCJjb21tYW5kIiwgIiIpWzo4MF0KICAgICAgICAgICAgICAgICAgICBwcmludChmIiAgQmFzaDoge2R9IiwgZmx1c2g9VHJ1ZSkKICAgICAgICAgICAgICAgIGVsaWYgbmFtZSBpbiAoIkVkaXQiLCAiV3JpdGUiKToKICAgICAgICAgICAgICAgICAgICBwcmludChmIiAge25hbWV9OiB7aW5wLmdldCgnZmlsZV9wYXRoJywgJycpfSIsIGZsdXNoPVRydWUpCiAgICAgICAgICAgICAgICBlbGlmIG5hbWUgPT0gIkFnZW50IjoKICAgICAgICAgICAgICAgICAgICBwcmludChmIgogIFN1YkFnZW50OiB7aW5wLmdldCgnZGVzY3JpcHRpb24nLCAnJyl9IiwgZmx1c2g9VHJ1ZSkKICAgICAgICAgICAgZWxpZiBjLmdldCgidHlwZSIpID09ICJ0ZXh0IjoKICAgICAgICAgICAgICAgIHR4dCA9IGMuZ2V0KCJ0ZXh0IiwgIiIpLnN0cmlwKCkKICAgICAgICAgICAgICAgIGlmIHR4dDoKICAgICAgICAgICAgICAgICAgICBwcmludChmIgp7dHh0fQoiLCBmbHVzaD1UcnVlKQogICAgZWxpZiB0ID09ICJyZXN1bHQiOgogICAgICAgIG9rID0gbm90IGUuZ2V0KCJpc19lcnJvciIpCiAgICAgICAgdHVybnMgPSBlLmdldCgibnVtX3R1cm5zIiwgIj8iKQogICAgICAgIGR1ciA9IGUuZ2V0KCJkdXJhdGlvbl9tcyIsIDApIC8gMTAwMAogICAgICAgIGNvc3QgPSBlLmdldCgidG90YWxfY29zdF91c2QiLCAwKQogICAgICAgIHMgPSAiU1VDQ0VTUyIgaWYgb2sgZWxzZSAiRkFJTEVEIgogICAgICAgIGxpbmUgPSAiPSIgKiA2MAogICAgICAgIHByaW50KGYiCntsaW5lfQp7c30gfCB7dHVybnN9IHR1cm5zIHwge2R1cjouMWZ9cyB8ICR7Y29zdDouNGZ9CntsaW5lfSIsIGZsdXNoPVRydWUpCiAgICAgICAgciA9IGUuZ2V0KCJyZXN1bHQiLCAiIikKICAgICAgICBpZiByOgogICAgICAgICAgICBwcmludChmIgp7cn0KIiwgZmx1c2g9VHJ1ZSkKCmZvciBsaW5lIGluIHN5cy5zdGRpbjoKICAgIGZtdChsaW5lKQo='))"
           AGENT="${{ inputs.agent }}"
           if [ "$AGENT" = "gemini" ]; then
             CMD="gemini"
