@@ -1155,10 +1155,17 @@ func NewEvent(ctx Context, name string, data map[string]any) (Event, error) {
 	}, nil
 }
 
-func (e Event) ID() uuid.UUID        { return e.id }
+// ID returns the unique ID of the event.
+func (e Event) ID() uuid.UUID { return e.id }
+
+// Timestamp returns the time the event was emitted.
 func (e Event) Timestamp() time.Time { return e.ts }
-func (e Event) Name() string         { return e.name }
-func (e Event) Origin() Module       { return e.origin } // Returns the module that originated the event. May be nil, usually if caddy core emits the event.
+
+// Name returns the name of the event.
+func (e Event) Name() string { return e.name }
+
+// Origin returns the module that originated the event. May be nil, usually if caddy core emits the event.
+func (e Event) Origin() Module { return e.origin }
 
 // CloudEvent exports event e as a structure that, when
 // serialized as JSON, is compatible with the
