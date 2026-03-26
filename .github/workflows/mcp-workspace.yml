@@ -95,4 +95,62 @@ jobs:
             -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
             -e TASK \
             ws-agent \
-            sh -c "$CMD \"\$TASK\""
+            sh -c "$CMD \"\$TASK\"" | python3 -u - <<'PYEOF'
+          import sys, json
+
+          def fmt(line):
+              line = line.strip()
+              if not line:
+                  return
+              try:
+                  e = json.loads(line)
+              except Exception:
+                  print(line, flush=True)
+                  return
+
+              t = e.get("type")
+              sub = e.get("subtype", "")
+
+              if t == "system" and sub == "init":
+                  print(f"\n🤖 Agent: {e.get('model')} v{e.get('claude_code_version')}  |  mode: {e.get('permissionMode')}\n", flush=True)
+
+              elif t == "system" and sub == "task_progress":
+                  tool = e.get("last_tool_name", "")
+                  desc = e.get("description", "")
+                  tok = e.get("usage", {}).get("total_tokens", 0)
+                  print(f"  ⚙️  [{tool}] {desc}  ({tok:,} tokens)", flush=True)
+
+              elif t == "assistant":
+                  for c in e.get("message", {}).get("content", []):
+                      if c.get("type") == "tool_use":
+                          name = c["name"]
+                          inp = c.get("input", {})
+                          if name == "Bash":
+                              print(f"  🔧 Bash: {inp.get('description', inp.get('command','')[:80])}", flush=True)
+                          elif name == "Edit":
+                              print(f"  ✏️  Edit: {inp.get('file_path','')}", flush=True)
+                          elif name == "Write":
+                              print(f"  📝 Write: {inp.get('file_path','')}", flush=True)
+                          elif name == "Agent":
+                              print(f"\n  🔍 SubAgent: {inp.get('description','')}", flush=True)
+                      elif c.get("type") == "text":
+                          txt = c.get("text", "").strip()
+                          if txt:
+                              print(f"\n💬 {txt}\n", flush=True)
+
+              elif t == "result":
+                  ok = not e.get("is_error")
+                  turns = e.get("num_turns", "?")
+                  dur = e.get("duration_ms", 0) / 1000
+                  cost = e.get("total_cost_usd", 0)
+                  status = "✅ SUCCESS" if ok else "❌ FAILED"
+                  print(f"\n{'='*60}", flush=True)
+                  print(f"{status}  |  {turns} turns  |  {dur:.1f}s  |  ${cost:.4f}", flush=True)
+                  print(f"{'='*60}", flush=True)
+                  result_text = e.get("result", "")
+                  if result_text:
+                      print(f"\n{result_text}\n", flush=True)
+
+          for line in sys.stdin:
+              fmt(line)
+          PYEOF
