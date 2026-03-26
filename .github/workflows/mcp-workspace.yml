@@ -84,11 +84,12 @@ jobs:
           else
             CMD="claude --output-format json -p"
           fi
+          export TASK=$(cat /tmp/ws-task/.task/context.yaml)
           docker run --rm \
             --memory 4g --pids-limit 512 \
             -w /workspace \
-            -v /tmp/ws-task/.task:/workspace/.task:ro \
             -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
             -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+            -e TASK \
             ws-agent \
-            sh -c "$CMD \"$(cat /workspace/.task/context.yaml)\""
+            sh -c "$CMD \"\$TASK\""
