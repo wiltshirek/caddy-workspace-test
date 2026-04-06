@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       task_context:
-        description: "YAML task spec for the agent"
+        description: "Task for the agent"
         required: true
         type: string
       job_token:
@@ -32,68 +32,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch platform secrets
-        id: secrets
+      - name: Setup agent
         run: |
           REPO="${{ github.repository }}"
           TOKEN="${{ inputs.job_token }}"
           BASE_URL="${{ inputs.platform_url }}"
+
           RESPONSE=$(curl -sf "$BASE_URL/api/v1/workspace/job-secrets?token=$TOKEN&repo=$REPO")
           if [ $? -ne 0 ]; then
-            echo "❌ Failed to fetch platform secrets — check job_token and platform_url"
+            echo "::error::Failed to fetch platform secrets"
             exit 1
           fi
           API_KEY=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['ANTHROPIC_API_KEY'])")
           echo "::add-mask::$API_KEY"
           echo "ANTHROPIC_API_KEY=$API_KEY" >> $GITHUB_ENV
 
-      - name: Build dev image
-        run: docker build -f Dockerfile.dev -t ws-dev .
-
-      - name: Layer agent CLI
-        run: |
           AGENT="${{ inputs.agent }}"
           if [ "$AGENT" = "gemini" ]; then
-            INSTALL="npm install -g @google/gemini-cli"
+            npm install -g @google/gemini-cli
           else
-            INSTALL="npm install -g @anthropic-ai/claude-code"
+            npm install -g @anthropic-ai/claude-code
           fi
-          cat > /tmp/Dockerfile.agent <<AGENTEOF
-          FROM ws-dev
-          USER root
-          RUN command -v node >/dev/null 2>&1 || \
-              (apt-get update -qq && apt-get install -y -qq nodejs npm > /dev/null 2>&1) ; \
-              $INSTALL
-          RUN command -v gh >/dev/null 2>&1 || \
-              (apt-get update -qq && apt-get install -y -qq gh > /dev/null 2>&1) || true
-          RUN useradd -m -s /bin/bash agent && mkdir -p /workspace && chown -R agent:agent /workspace
-          USER agent
-          AGENTEOF
-          docker build -f /tmp/Dockerfile.agent -t ws-agent /tmp
-
-      - name: Write task context
-        run: |
-          mkdir -p /tmp/ws-task/.task
-          cat > /tmp/ws-task/.task/context.yaml <<'CTXEOF'
-          ${{ inputs.task_context }}
-          CTXEOF
 
       - name: Run agent
         run: |
-          python3 -c "import base64; open('/tmp/fmt.py','wb').write(base64.b64decode('aW1wb3J0IHN5cywganNvbgoKTkwgPSBjaHIoMTApClNFUCA9ICc9JyAqIDYwCgpkZWYgZm10KGxpbmUpOgogICAgbGluZSA9IGxpbmUuc3RyaXAoKQogICAgaWYgbm90IGxpbmU6IHJldHVybgogICAgdHJ5OiBlID0ganNvbi5sb2FkcyhsaW5lKQogICAgZXhjZXB0IEV4Y2VwdGlvbjogcHJpbnQobGluZSwgZmx1c2g9VHJ1ZSk7IHJldHVybgogICAgdCA9IGUuZ2V0KCd0eXBlJykKICAgIHN1YiA9IGUuZ2V0KCdzdWJ0eXBlJywgJycpCiAgICBpZiB0ID09ICdzeXN0ZW0nIGFuZCBzdWIgPT0gJ2luaXQnOgogICAgICAgIG0gPSBlLmdldCgnbW9kZWwnLCAnJykKICAgICAgICB2ID0gZS5nZXQoJ2NsYXVkZV9jb2RlX3ZlcnNpb24nLCAnJykKICAgICAgICBwcmludChOTCArICdbQUdFTlRdICcgKyBtICsgJyB2JyArIHYgKyBOTCwgZmx1c2g9VHJ1ZSkKICAgIGVsaWYgdCA9PSAnc3lzdGVtJyBhbmQgc3ViID09ICd0YXNrX3Byb2dyZXNzJzoKICAgICAgICB0b29sID0gZS5nZXQoJ2xhc3RfdG9vbF9uYW1lJywgJycpCiAgICAgICAgZGVzYyA9IGUuZ2V0KCdkZXNjcmlwdGlvbicsICcnKQogICAgICAgIHByaW50KCcgIFsnICsgdG9vbCArICddICcgKyBkZXNjLCBmbHVzaD1UcnVlKQogICAgZWxpZiB0ID09ICdhc3Npc3RhbnQnOgogICAgICAgIGZvciBjIGluIGUuZ2V0KCdtZXNzYWdlJywge30pLmdldCgnY29udGVudCcsIFtdKToKICAgICAgICAgICAgaWYgYy5nZXQoJ3R5cGUnKSA9PSAndG9vbF91c2UnOgogICAgICAgICAgICAgICAgbmFtZSA9IGNbJ25hbWUnXQogICAgICAgICAgICAgICAgaW5wID0gYy5nZXQoJ2lucHV0Jywge30pCiAgICAgICAgICAgICAgICBpZiBuYW1lID09ICdCYXNoJzoKICAgICAgICAgICAgICAgICAgICBkID0gaW5wLmdldCgnZGVzY3JpcHRpb24nKSBvciBpbnAuZ2V0KCdjb21tYW5kJywgJycpWzo4MF0KICAgICAgICAgICAgICAgICAgICBwcmludCgnICBCYXNoOiAnICsgc3RyKGQpLCBmbHVzaD1UcnVlKQogICAgICAgICAgICAgICAgZWxpZiBuYW1lIGluICgnRWRpdCcsICdXcml0ZScpOgogICAgICAgICAgICAgICAgICAgIHByaW50KCcgICcgKyBuYW1lICsgJzogJyArIGlucC5nZXQoJ2ZpbGVfcGF0aCcsICcnKSwgZmx1c2g9VHJ1ZSkKICAgICAgICAgICAgICAgIGVsaWYgbmFtZSA9PSAnQWdlbnQnOgogICAgICAgICAgICAgICAgICAgIHByaW50KE5MICsgJyAgU3ViQWdlbnQ6ICcgKyBpbnAuZ2V0KCdkZXNjcmlwdGlvbicsICcnKSwgZmx1c2g9VHJ1ZSkKICAgICAgICAgICAgZWxpZiBjLmdldCgndHlwZScpID09ICd0ZXh0JzoKICAgICAgICAgICAgICAgIHR4dCA9IGMuZ2V0KCd0ZXh0JywgJycpLnN0cmlwKCkKICAgICAgICAgICAgICAgIGlmIHR4dDogcHJpbnQoTkwgKyB0eHQgKyBOTCwgZmx1c2g9VHJ1ZSkKICAgIGVsaWYgdCA9PSAncmVzdWx0JzoKICAgICAgICBvayA9IG5vdCBlLmdldCgnaXNfZXJyb3InKQogICAgICAgIHR1cm5zID0gZS5nZXQoJ251bV90dXJucycsICc/JykKICAgICAgICBkdXIgPSBlLmdldCgnZHVyYXRpb25fbXMnLCAwKSAvIDEwMDAKICAgICAgICBjb3N0ID0gZS5nZXQoJ3RvdGFsX2Nvc3RfdXNkJywgMCkKICAgICAgICBzID0gJ1NVQ0NFU1MnIGlmIG9rIGVsc2UgJ0ZBSUxFRCcKICAgICAgICBwcmludChOTCArIFNFUCwgZmx1c2g9VHJ1ZSkKICAgICAgICBwcmludChzICsgJyB8ICcgKyBzdHIodHVybnMpICsgJyB0dXJucyB8ICcgKyBzdHIocm91bmQoZHVyLDEpKSArICdzIHwgJCcgKyBzdHIocm91bmQoY29zdCw0KSksIGZsdXNoPVRydWUpCiAgICAgICAgcHJpbnQoU0VQLCBmbHVzaD1UcnVlKQogICAgICAgIHIgPSBlLmdldCgncmVzdWx0JywgJycpCiAgICAgICAgaWYgcjogcHJpbnQoTkwgKyByICsgTkwsIGZsdXNoPVRydWUpCgpmb3IgbGluZSBpbiBzeXMuc3RkaW46IGZtdChsaW5lKQo='))"
           AGENT="${{ inputs.agent }}"
           if [ "$AGENT" = "gemini" ]; then
             CMD="gemini"
           else
             CMD="claude --dangerously-skip-permissions --output-format stream-json --verbose -p"
           fi
-          export TASK=$(cat /tmp/ws-task/.task/context.yaml)
-          docker run --rm \
-            --memory 4g --pids-limit 512 \
-            -w /workspace \
-            -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
-            -e GH_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
-            -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
-            -e TASK \
-            ws-agent \
-            sh -c "$CMD \"\$TASK\"" | python3 -u /tmp/fmt.py
+          TASK=$(cat <<'TASKEOF'
+          ${{ inputs.task_context }}
+          TASKEOF
+          )
+          $CMD "$TASK"
