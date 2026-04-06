@@ -506,8 +506,10 @@ func setResourceLimits(logger *zap.Logger) func() {
 // StringSlice is a flag.Value that enables repeated use of a string flag.
 type StringSlice []string
 
+// String returns a string representation of the StringSlice.
 func (ss StringSlice) String() string { return "[" + strings.Join(ss, ", ") + "]" }
 
+// Set appends value to the StringSlice. It implements the flag.Value interface.
 func (ss *StringSlice) Set(value string) error {
 	*ss = append(*ss, value)
 	return nil
