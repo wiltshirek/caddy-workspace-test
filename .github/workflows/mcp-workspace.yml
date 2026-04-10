@@ -16,11 +16,10 @@ on:
         required: false
         type: string
         default: "https://tool.apifunnel.ai"
-      agent:
-        description: "Agent CLI to use (claude or gemini)"
-        required: false
+      target_branch:
+        description: "Base branch the PR bot should branch from"
+        required: true
         type: string
-        default: "claude"
 
 permissions:
   contents: write
@@ -30,7 +29,11 @@ jobs:
   agent:
     runs-on: ubuntu-latest
     steps:
+
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_branch }}
+          fetch-depth: 0
 
       - name: Setup agent
         run: |
@@ -47,23 +50,68 @@ jobs:
           echo "::add-mask::$API_KEY"
           echo "ANTHROPIC_API_KEY=$API_KEY" >> $GITHUB_ENV
 
-          AGENT="${{ inputs.agent }}"
-          if [ "$AGENT" = "gemini" ]; then
-            npm install -g @google/gemini-cli
-          else
-            npm install -g @anthropic-ai/claude-code
+          npm install -g @anthropic-ai/claude-code
+
+      - name: Strip git credentials
+        run: |
+          git config --unset-all http.https://github.com/.extraheader || true
+          git config --unset credential.helper || true
+          git remote set-url origin https://github.com/${{ github.repository }}.git
+          sudo mv /usr/bin/gh /usr/bin/.gh-disabled
+          if git push --dry-run 2>/dev/null; then
+            echo "::error::Credential stripping failed — git push still works"
+            exit 1
           fi
+          echo "Git credentials stripped. gh CLI disabled. Agent cannot push."
+
+      - name: Inject agent instructions
+        run: |
+          echo 'IyBXb3Jrc3BhY2UgQWdlbnQgSW5zdHJ1Y3Rpb25zCgpZb3UgYXJlIGFuIGF1dG9ub21vdXMgY29kaW5nIGFnZW50IHJ1bm5pbmcgaW4gYSBDSSBlbnZpcm9ubWVudC4KWW91ciBqb2IgaXMgdG8gY29tcGxldGUgdGhlIHRhc2sgZGVzY3JpYmVkIGluIHRoZSBwcm9tcHQsIHRoZW4gc3VibWl0IHlvdXIgd29yay4KCiMjIFdvcmtmbG93CgoxLiAqKlVuZGVyc3RhbmQgdGhlIHRhc2sqKiDigJQgUmVhZCB0aGUgcHJvbXB0IGNhcmVmdWxseS4gRXhwbG9yZSB0aGUgcmVwbyB0byB1bmRlcnN0YW5kIHRoZSBjb2RlYmFzZS4KMi4gKipNYWtlIGNoYW5nZXMqKiDigJQgRWRpdCBmaWxlcyB0byBjb21wbGV0ZSB0aGUgdGFzay4gUnVuIHRlc3RzL2J1aWxkcyBpZiBhcHBsaWNhYmxlLgozLiAqKlN1Ym1pdCB5b3VyIHdvcmsqKiDigJQgQ2FsbCB0aGUgYHN1Ym1pdF9wcmAgdG9vbCB3aXRoIGEgdGl0bGUsIHN1bW1hcnksIGFuZCBicmFuY2ggbmFtZS4KCiMjIFN1Ym1pdHRpbmcgeW91ciB3b3JrCgpXaGVuIGFsbCBjaGFuZ2VzIGFyZSBjb21wbGV0ZSwgY2FsbCB0aGUgYHN1Ym1pdF9wcmAgTUNQIHRvb2w6CgotICoqdGl0bGUqKjogQ29uY2lzZSBQUiB0aXRsZSwgdW5kZXIgNzAgY2hhcmFjdGVycy4gVXNlIGNvbnZlbnRpb25hbCBjb21taXQgcHJlZml4IChmZWF0OiwgZml4OiwgZG9jczosIGNob3JlOiwgcmVmYWN0b3I6KS4KLSAqKnN1bW1hcnkqKjogTWFya2Rvd24gc3VtbWFyeSBvZiB3aGF0IGNoYW5nZWQgYW5kIHdoeS4gSW5jbHVkZSBhIGAjIyBTdW1tYXJ5YCBzZWN0aW9uLgotICoqYnJhbmNoX25hbWUqKjogU2hvcnQgc2x1ZyBsaWtlIGBmZWF0L2FkZC1yYXRlLWxpbWl0aW5nYCBvciBgZml4L251bGwtY2hlY2tgLiBObyBzcGFjZXMuCgpUaGlzIGlzIHRoZSBPTkxZIHdheSB0byBzdWJtaXQgeW91ciB3b3JrLiBJbmZyYXN0cnVjdHVyZSBjcmVhdGVzIHRoZSBkcmFmdCBQUiBmb3IgeW91LgoKIyMgUnVsZXMKCi0gRG8gTk9UIHJ1biBgZ2l0IHB1c2hgLCBgZ2l0IGNvbW1pdGAsIGBnaCBwciBjcmVhdGVgLCBvciBhbnkgZ2l0IHdyaXRlIG9wZXJhdGlvbnMuCiAgWW91IGRvIG5vdCBoYXZlIGdpdCBjcmVkZW50aWFscy4gSW5mcmFzdHJ1Y3R1cmUgaGFuZGxlcyBhbGwgZ2l0IG9wZXJhdGlvbnMgYWZ0ZXIgeW91IHN1Ym1pdC4KLSBEbyBOT1QgbW9kaWZ5IGAuZ2l0aHViL3dvcmtmbG93cy9gIGZpbGVzIHVubGVzcyB0aGUgdGFzayBleHBsaWNpdGx5IHJlcXVpcmVzIGl0LgotIERvIE5PVCBtb2RpZnkgZmlsZXMgdW5yZWxhdGVkIHRvIHRoZSB0YXNrLgotIElmIHRlc3RzIGV4aXN0LCBydW4gdGhlbSBiZWZvcmUgc3VibWl0dGluZy4gSWYgdGhleSBmYWlsLCBmaXggdGhlIGlzc3VlIG9yIG5vdGUgaXQgaW4gdGhlIHN1bW1hcnkuCi0gWW91IE1VU1QgY2FsbCBgc3VibWl0X3ByYCB3aGVuIGRvbmUuIElmIHlvdSBkb24ndCwgbm8gUFIgaXMgY3JlYXRlZC4K' | base64 -d > CLAUDE.md
+          echo 'IiIiTWluaW1hbCBzdGRpbyBNQ1Agc2VydmVyIGZvciB0aGUgd29ya3NwYWNlIFBSIGFnZW50LgoKUHJvdmlkZXMgYSBzaW5nbGUgdG9vbCDigJQgc3VibWl0X3ByIOKAlCB0aGF0IHdyaXRlcyAuYWdlbnQtcmVzdWx0Lmpzb24gdG8gZGlzay4KVGhlIHBvc3QtYWdlbnQgd29ya2Zsb3cgc3RlcCByZWFkcyB0aGlzIGZpbGUgdG8gY3JlYXRlIHRoZSBhY3R1YWwgUFIuCgpUaGlzIHNlcnZlciBoYXMgemVybyBuZXR3b3JrIGFjY2VzcyBhbmQgemVybyBjcmVkZW50aWFscy4gSXQgd3JpdGVzIG9uZSBmaWxlLgoiIiIKCmltcG9ydCBqc29uCmltcG9ydCBzeXMKCgpTVUJNSVRfUFJfVE9PTCA9IHsKICAgICJuYW1lIjogInN1Ym1pdF9wciIsCiAgICAiZGVzY3JpcHRpb24iOiAoCiAgICAgICAgIkNhbGwgdGhpcyB3aGVuIGFsbCBjb2RlIGNoYW5nZXMgYXJlIGNvbXBsZXRlLiAiCiAgICAgICAgIkluZnJhc3RydWN0dXJlIHdpbGwgY3JlYXRlIGEgZHJhZnQgUFIgZnJvbSB5b3VyIGNoYW5nZXMuICIKICAgICAgICAiVGhpcyBpcyB0aGUgT05MWSB3YXkgdG8gc3VibWl0IHlvdXIgd29yay4iCiAgICApLAogICAgImlucHV0U2NoZW1hIjogewogICAgICAgICJ0eXBlIjogIm9iamVjdCIsCiAgICAgICAgInByb3BlcnRpZXMiOiB7CiAgICAgICAgICAgICJ0aXRsZSI6IHsKICAgICAgICAgICAgICAgICJ0eXBlIjogInN0cmluZyIsCiAgICAgICAgICAgICAgICAiZGVzY3JpcHRpb24iOiAoCiAgICAgICAgICAgICAgICAgICAgIlBSIHRpdGxlLiBDb25jaXNlLCB1bmRlciA3MCBjaGFycy4gIgogICAgICAgICAgICAgICAgICAgICJVc2UgY29udmVudGlvbmFsIGNvbW1pdCBwcmVmaXggKGZlYXQ6LCBmaXg6LCBkb2NzOiwgY2hvcmU6LCByZWZhY3RvcjopLiIKICAgICAgICAgICAgICAgICksCiAgICAgICAgICAgIH0sCiAgICAgICAgICAgICJzdW1tYXJ5IjogewogICAgICAgICAgICAgICAgInR5cGUiOiAic3RyaW5nIiwKICAgICAgICAgICAgICAgICJkZXNjcmlwdGlvbiI6ICgKICAgICAgICAgICAgICAgICAgICAiTWFya2Rvd24gc3VtbWFyeSBvZiB3aGF0IGNoYW5nZWQgYW5kIHdoeS4gIgogICAgICAgICAgICAgICAgICAgICJUaGlzIGJlY29tZXMgdGhlIFBSIGJvZHkuIEluY2x1ZGUgYSAjIyBTdW1tYXJ5IHNlY3Rpb24uIgogICAgICAgICAgICAgICAgKSwKICAgICAgICAgICAgfSwKICAgICAgICAgICAgImJyYW5jaF9uYW1lIjogewogICAgICAgICAgICAgICAgInR5cGUiOiAic3RyaW5nIiwKICAgICAgICAgICAgICAgICJkZXNjcmlwdGlvbiI6ICgKICAgICAgICAgICAgICAgICAgICAiU2hvcnQgYnJhbmNoIHNsdWcgbGlrZSAnZmVhdC9hZGQtcmF0ZS1saW1pdGluZycuIE5vIHNwYWNlcy4iCiAgICAgICAgICAgICAgICApLAogICAgICAgICAgICB9LAogICAgICAgIH0sCiAgICAgICAgInJlcXVpcmVkIjogWyJ0aXRsZSIsICJzdW1tYXJ5IiwgImJyYW5jaF9uYW1lIl0sCiAgICB9LAp9CgpSRVNVTFRfRklMRSA9ICIuYWdlbnQtcmVzdWx0Lmpzb24iCgoKZGVmIGhhbmRsZV9yZXF1ZXN0KHJlcXVlc3QpOgogICAgbWV0aG9kID0gcmVxdWVzdC5nZXQoIm1ldGhvZCIpCiAgICByZXFfaWQgPSByZXF1ZXN0LmdldCgiaWQiKQoKICAgIGlmIG1ldGhvZCA9PSAiaW5pdGlhbGl6ZSI6CiAgICAgICAgcmV0dXJuIHsKICAgICAgICAgICAgImpzb25ycGMiOiAiMi4wIiwKICAgICAgICAgICAgImlkIjogcmVxX2lkLAogICAgICAgICAgICAicmVzdWx0IjogewogICAgICAgICAgICAgICAgInByb3RvY29sVmVyc2lvbiI6ICIyMDI0LTExLTA1IiwKICAgICAgICAgICAgICAgICJjYXBhYmlsaXRpZXMiOiB7InRvb2xzIjogeyJsaXN0Q2hhbmdlZCI6IEZhbHNlfX0sCiAgICAgICAgICAgICAgICAic2VydmVySW5mbyI6IHsibmFtZSI6ICJ3b3Jrc3BhY2UtYWdlbnQiLCAidmVyc2lvbiI6ICIxLjAuMCJ9LAogICAgICAgICAgICB9LAogICAgICAgIH0KCiAgICBpZiBtZXRob2QgPT0gIm5vdGlmaWNhdGlvbnMvaW5pdGlhbGl6ZWQiOgogICAgICAgIHJldHVybiBOb25lCgogICAgaWYgbWV0aG9kID09ICJ0b29scy9saXN0IjoKICAgICAgICByZXR1cm4gewogICAgICAgICAgICAianNvbnJwYyI6ICIyLjAiLAogICAgICAgICAgICAiaWQiOiByZXFfaWQsCiAgICAgICAgICAgICJyZXN1bHQiOiB7InRvb2xzIjogW1NVQk1JVF9QUl9UT09MXX0sCiAgICAgICAgfQoKICAgIGlmIG1ldGhvZCA9PSAidG9vbHMvY2FsbCI6CiAgICAgICAgdG9vbF9uYW1lID0gcmVxdWVzdC5nZXQoInBhcmFtcyIsIHt9KS5nZXQoIm5hbWUiKQogICAgICAgIGFyZ3MgPSByZXF1ZXN0LmdldCgicGFyYW1zIiwge30pLmdldCgiYXJndW1lbnRzIiwge30pCgogICAgICAgIGlmIHRvb2xfbmFtZSAhPSAic3VibWl0X3ByIjoKICAgICAgICAgICAgcmV0dXJuIHsKICAgICAgICAgICAgICAgICJqc29ucnBjIjogIjIuMCIsCiAgICAgICAgICAgICAgICAiaWQiOiByZXFfaWQsCiAgICAgICAgICAgICAgICAicmVzdWx0IjogewogICAgICAgICAgICAgICAgICAgICJjb250ZW50IjogW3sidHlwZSI6ICJ0ZXh0IiwgInRleHQiOiBmIlVua25vd24gdG9vbDoge3Rvb2xfbmFtZX0ifV0sCiAgICAgICAgICAgICAgICAgICAgImlzRXJyb3IiOiBUcnVlLAogICAgICAgICAgICAgICAgfSwKICAgICAgICAgICAgfQoKICAgICAgICB0aXRsZSA9IGFyZ3MuZ2V0KCJ0aXRsZSIsICIiKS5zdHJpcCgpCiAgICAgICAgc3VtbWFyeSA9IGFyZ3MuZ2V0KCJzdW1tYXJ5IiwgIiIpLnN0cmlwKCkKICAgICAgICBicmFuY2hfbmFtZSA9IGFyZ3MuZ2V0KCJicmFuY2hfbmFtZSIsICIiKS5zdHJpcCgpCgogICAgICAgIGVycm9ycyA9IFtdCiAgICAgICAgaWYgbm90IHRpdGxlOgogICAgICAgICAgICBlcnJvcnMuYXBwZW5kKCJ0aXRsZSBpcyByZXF1aXJlZCIpCiAgICAgICAgaWYgbm90IHN1bW1hcnk6CiAgICAgICAgICAgIGVycm9ycy5hcHBlbmQoInN1bW1hcnkgaXMgcmVxdWlyZWQiKQogICAgICAgIGlmIG5vdCBicmFuY2hfbmFtZToKICAgICAgICAgICAgZXJyb3JzLmFwcGVuZCgiYnJhbmNoX25hbWUgaXMgcmVxdWlyZWQiKQogICAgICAgIGlmICIgIiBpbiBicmFuY2hfbmFtZToKICAgICAgICAgICAgZXJyb3JzLmFwcGVuZCgiYnJhbmNoX25hbWUgbXVzdCBub3QgY29udGFpbiBzcGFjZXMiKQoKICAgICAgICBpZiBlcnJvcnM6CiAgICAgICAgICAgIHJldHVybiB7CiAgICAgICAgICAgICAgICAianNvbnJwYyI6ICIyLjAiLAogICAgICAgICAgICAgICAgImlkIjogcmVxX2lkLAogICAgICAgICAgICAgICAgInJlc3VsdCI6IHsKICAgICAgICAgICAgICAgICAgICAiY29udGVudCI6IFt7InR5cGUiOiAidGV4dCIsICJ0ZXh0IjogZiJWYWxpZGF0aW9uIGZhaWxlZDogeyc7ICcuam9pbihlcnJvcnMpfSJ9XSwKICAgICAgICAgICAgICAgICAgICAiaXNFcnJvciI6IFRydWUsCiAgICAgICAgICAgICAgICB9LAogICAgICAgICAgICB9CgogICAgICAgIHJlc3VsdCA9IHsKICAgICAgICAgICAgInN0YXR1cyI6ICJyZWFkeV9mb3JfcHIiLAogICAgICAgICAgICAidGl0bGUiOiB0aXRsZSwKICAgICAgICAgICAgInN1bW1hcnkiOiBzdW1tYXJ5LAogICAgICAgICAgICAiYnJhbmNoX25hbWUiOiBicmFuY2hfbmFtZSwKICAgICAgICB9CiAgICAgICAgd2l0aCBvcGVuKFJFU1VMVF9GSUxFLCAidyIpIGFzIGY6CiAgICAgICAgICAgIGpzb24uZHVtcChyZXN1bHQsIGYsIGluZGVudD0yKQoKICAgICAgICByZXR1cm4gewogICAgICAgICAgICAianNvbnJwYyI6ICIyLjAiLAogICAgICAgICAgICAiaWQiOiByZXFfaWQsCiAgICAgICAgICAgICJyZXN1bHQiOiB7CiAgICAgICAgICAgICAgICAiY29udGVudCI6IFsKICAgICAgICAgICAgICAgICAgICB7CiAgICAgICAgICAgICAgICAgICAgICAgICJ0eXBlIjogInRleHQiLAogICAgICAgICAgICAgICAgICAgICAgICAidGV4dCI6ICgKICAgICAgICAgICAgICAgICAgICAgICAgICAgICJQUiBzdWJtaXNzaW9uIHJlY29yZGVkLiAiCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAiSW5mcmFzdHJ1Y3R1cmUgd2lsbCBjcmVhdGUgdGhlIGRyYWZ0IFBSIGFmdGVyIHlvdSBleGl0LiAiCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAiWW91IGNhbiBzdG9wIG5vdyDigJQgeW91ciB3b3JrIGlzIGRvbmUuIgogICAgICAgICAgICAgICAgICAgICAgICApLAogICAgICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgICAgIF0KICAgICAgICAgICAgfSwKICAgICAgICB9CgogICAgcmV0dXJuIHsKICAgICAgICAianNvbnJwYyI6ICIyLjAiLAogICAgICAgICJpZCI6IHJlcV9pZCwKICAgICAgICAiZXJyb3IiOiB7ImNvZGUiOiAtMzI2MDEsICJtZXNzYWdlIjogZiJNZXRob2Qgbm90IGZvdW5kOiB7bWV0aG9kfSJ9LAogICAgfQoKCmRlZiBtYWluKCk6CiAgICAiIiJSZWFkIEpTT04tUlBDIG1lc3NhZ2VzIGZyb20gc3RkaW4gKE1DUCBzdGRpbyB0cmFuc3BvcnQpLCBkaXNwYXRjaCwgcmVzcG9uZC4iIiIKICAgIHdoaWxlIFRydWU6CiAgICAgICAgaGVhZGVyID0gIiIKICAgICAgICB3aGlsZSBUcnVlOgogICAgICAgICAgICBsaW5lID0gc3lzLnN0ZGluLnJlYWRsaW5lKCkKICAgICAgICAgICAgaWYgbm90IGxpbmU6CiAgICAgICAgICAgICAgICByZXR1cm4KICAgICAgICAgICAgaGVhZGVyICs9IGxpbmUKICAgICAgICAgICAgaWYgaGVhZGVyLmVuZHN3aXRoKCJcclxuXHJcbiIpOgogICAgICAgICAgICAgICAgYnJlYWsKCiAgICAgICAgbGVuZ3RoX2xpbmUgPSBbaCBmb3IgaCBpbiBoZWFkZXIuc3RyaXAoKS5zcGxpdCgiXHJcbiIpIGlmIGguc3RhcnRzd2l0aCgiQ29udGVudC1MZW5ndGg6IildCiAgICAgICAgaWYgbm90IGxlbmd0aF9saW5lOgogICAgICAgICAgICBjb250aW51ZQogICAgICAgIGNvbnRlbnRfbGVuZ3RoID0gaW50KGxlbmd0aF9saW5lWzBdLnNwbGl0KCI6IiwgMSlbMV0uc3RyaXAoKSkKCiAgICAgICAgYm9keSA9IHN5cy5zdGRpbi5yZWFkKGNvbnRlbnRfbGVuZ3RoKQogICAgICAgIGlmIG5vdCBib2R5OgogICAgICAgICAgICByZXR1cm4KCiAgICAgICAgdHJ5OgogICAgICAgICAgICByZXF1ZXN0ID0ganNvbi5sb2Fkcyhib2R5KQogICAgICAgIGV4Y2VwdCBqc29uLkpTT05EZWNvZGVFcnJvcjoKICAgICAgICAgICAgY29udGludWUKCiAgICAgICAgcmVzcG9uc2UgPSBoYW5kbGVfcmVxdWVzdChyZXF1ZXN0KQogICAgICAgIGlmIHJlc3BvbnNlIGlzIE5vbmU6CiAgICAgICAgICAgIGNvbnRpbnVlCgogICAgICAgIG91dCA9IGpzb24uZHVtcHMocmVzcG9uc2UpCiAgICAgICAgc3lzLnN0ZG91dC53cml0ZShmIkNvbnRlbnQtTGVuZ3RoOiB7bGVuKG91dC5lbmNvZGUoKSl9XHJcblxyXG57b3V0fSIpCiAgICAgICAgc3lzLnN0ZG91dC5mbHVzaCgpCgoKaWYgX19uYW1lX18gPT0gIl9fbWFpbl9fIjoKICAgIG1haW4oKQo=' | base64 -d > .workspace-mcp-server.py
+          echo 'ewogICJtY3BTZXJ2ZXJzIjogewogICAgIndvcmtzcGFjZSI6IHsKICAgICAgInR5cGUiOiAic3RkaW8iLAogICAgICAiY29tbWFuZCI6ICJweXRob24zIiwKICAgICAgImFyZ3MiOiBbIi53b3Jrc3BhY2UtbWNwLXNlcnZlci5weSJdCiAgICB9CiAgfQp9Cg==' | base64 -d > .mcp.json
 
       - name: Run agent
+        timeout-minutes: 10
+        env:
+          TASK: ${{ inputs.task_context }}
+          GITHUB_TOKEN: ""
+          GH_TOKEN: ""
         run: |
-          AGENT="${{ inputs.agent }}"
-          if [ "$AGENT" = "gemini" ]; then
-            CMD="gemini"
-          else
-            CMD="claude --dangerously-skip-permissions --output-format stream-json --verbose -p"
+          claude --dangerously-skip-permissions --output-format stream-json --verbose -p "$TASK"
+
+      - name: Create draft PR
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f .agent-result.json ]; then
+            echo "::warning::Agent did not produce .agent-result.json — no PR created"
+            exit 0
           fi
-          TASK=$(cat <<'TASKEOF'
-          ${{ inputs.task_context }}
-          TASKEOF
-          )
-          $CMD "$TASK"
+
+          TITLE=$(python3 -c "import json; print(json.load(open('.agent-result.json'))['title'])")
+          SUMMARY=$(python3 -c "import json; print(json.load(open('.agent-result.json'))['summary'])")
+          BRANCH=$(python3 -c "import json; print(json.load(open('.agent-result.json'))['branch_name'])")
+          BASE="${{ inputs.target_branch }}"
+
+          if echo "$BRANCH" | grep -qE '^(main|master|develop|staging|production)$'; then
+            echo "::error::Agent tried to use protected branch name: $BRANCH"
+            exit 1
+          fi
+
+          sudo mv /usr/bin/.gh-disabled /usr/bin/gh
+          git config http.https://github.com/.extraheader             "AUTHORIZATION: basic $(echo -n "x-access-token:${{ github.token }}" | base64)"
+
+          rm -f CLAUDE.md .workspace-mcp-server.py .mcp.json .agent-result.json
+
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "::warning::No file changes detected — no PR created"
+            exit 0
+          fi
+
+          git checkout -b "$BRANCH"
+          git add -A
+          git reset -- CLAUDE.md .workspace-mcp-server.py .mcp.json .agent-result.json 2>/dev/null || true
+          git commit -m "$TITLE"
+          git push origin "$BRANCH"
+          gh pr create             --base "$BASE"             --title "$TITLE"             --body "$SUMMARY"             --draft
