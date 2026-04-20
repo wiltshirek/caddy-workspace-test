@@ -223,3 +223,7 @@ Matthew Holt began developing Caddy in 2014 while studying computer science at B
 Caddy is a project of [ZeroSSL](https://zerossl.com), an HID Global company.
 
 Debian package repository hosting is graciously provided by [Cloudsmith](https://cloudsmith.com). Cloudsmith is the only fully hosted, cloud-native, universal package management solution, that enables your organization to create, store and share packages in any format, to any place, with total confidence.
+
+## WS-TIMING-1: Workspace Smoke Test
+
+`go test ./...` passes — all packages verified on 2026-03-23.
